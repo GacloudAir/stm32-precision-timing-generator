@@ -1,0 +1,24 @@
+# Keil build output
+*.o
+*.d
+*.axf
+*.hex
+*.bin
+*.lst
+*.map
+*.sfr
+*.iex
+*.ixt
+*.htm
+Objects/
+Listings/
+DebugConfig/
+RTE/
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+*.bak
+*.tmp
