@@ -41,7 +41,7 @@ The firmware is fixed-frequency in this release. Runtime frequency / duty config
 ## Quick start
 
 1. Open `firmware/target/timing-generator.uvprojx` in Keil MDK (armclang V6.24, STM32F1xx DFP 2.4.1)
-2. Build — expect `0 Error, 0 Warning`, code size ~1.1 KB
+2. Build — expect `0 Error, 0 Warning`, code size ~1.3 KB
 3. Flash with ST-Link V2 (SWD)
 4. Connect oscilloscope probes to PA1 / PA2 / PA3, common ground
 5. Trigger on PA1 rising edge, timebase 1 us/div
