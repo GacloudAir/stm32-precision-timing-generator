@@ -91,6 +91,12 @@ assets/     oscilloscope captures and diagrams
 - [ ] PC host tool in C++ (serial port + frame protocol + CSV export)
 - [ ] Input-capture self-check with error report
 
+## Contributing
+
+This project is mirrored on both GitHub and Gitea. **For collaborators: see
+[MAINTENANCE.md](MAINTENANCE.md)** for authentication, dual-remote push, and
+troubleshooting before making changes.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
