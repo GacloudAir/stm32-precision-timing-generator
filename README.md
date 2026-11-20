@@ -72,10 +72,23 @@ On reset, GPIOs default to floating inputs. If the timer is enabled before the p
 
 ## Verification
 
-- [ ] Three-channel waveform capture with readable timebase/measurements (PA1 / PA2 / PA3)
-- [ ] "Set vs measured" error table (target < 0.5%)
+Measured on real hardware with a two-channel scope (the three channels are
+verified pairwise; together the two captures cover every pairwise relation):
 
-Captures are added to `assets/` once available.
+![PA1 + PA3, 2 us/div](assets/oe_damp_2us_per_div.png)
+
+PA1 high 4 us / PA3 high 2 us, perfectly complementary — the falling edge of
+PA1 and the rising edge of PA3 are aligned by hardware at the same counter
+value, with no software delay.
+
+![PA2 + PA3, 1 us/div](assets/pulse_damp_1us_per_div.png)
+
+PA2 high 2 us / PA3 high 2 us, with the 2 us all-low gap between them, and
+PA3's falling edge coinciding with the next period's PA2 rising edge.
+
+- [x] Waveform captures with readable timebase (see `assets/`)
+- [ ] Single three-channel capture (needs a 4-channel scope)
+- [ ] "Set vs measured" error table (target < 0.5%)
 
 ## Project structure
 
