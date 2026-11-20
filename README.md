@@ -1,5 +1,7 @@
 # STM32 Precision Timing Generator
 
+English | [简体中文](README_CN.md)
+
 A three-channel, nanosecond-resolution timing waveform generator built on STM32F103C8T6. All three channels are produced by hardware timer output-compare on a single timer — no software bit-banging, no FPGA, no HAL library.
 
 ## Features
