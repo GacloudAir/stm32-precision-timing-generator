@@ -98,9 +98,31 @@ git ls-remote gitea refs/heads/main     # Gitea
 
 ---
 
-## 五、网络与代理（重要）
+## 五、网络与 DNS 污染（重要）
 
-GitHub 在国内直连常常超时或被阻断，需要走本地代理（Clash Verge）。
+**GitHub 直连失败的常见真因是 DNS 污染，而非代理进程问题。** 现象：`git push origin main` 报 `Failed to connect to github.com:443`（约 21 秒超时）或 TLS 握手失败。诊断方法：
+
+```sh
+nslookup github.com                 # 若返回 57.x.x.x 等非 140.82/20.205 段的 IP，即被污染
+nslookup github.com 223.5.5.5       # 公共 DNS 应返回真实 IP（如 20.205.243.166）
+```
+
+根治办法：把系统 DNS 改成公共 DNS（`223.5.5.5` / `119.29.29.29`），或在管理员权限下于
+`C:\Windows\System32\drivers\etc\hosts` 添加 `140.82.112.3 github.com`。
+
+应急直连（不改系统配置、不走代理）：用 GitHub 真实 IP + 强制 Host 头推送。
+注意 GCM 会按 URL 中的 host 查凭据，用 IP 时需用内存中的 PAT 内嵌 URL：
+
+```sh
+TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill | grep '^password=' | cut -d= -f2-)
+git -c http.sslBackend=openssl -c http.sslVerify=false -c http.extraHeader="Host: github.com" \
+  push "https://PersonalAccessToken:${TOKEN}@140.82.112.3/GacloudAir/stm32-precision-timing-generator.git" main
+unset TOKEN
+```
+
+以下代理排障信息保留作参考，但 Clash 的 AI 服务订阅组（节点名含「续费」「到期」）与 GitHub 出口无关，不要据此判断代理不可用：
+
+GitHub 在国内直连也可能因网络波动超时，此时可走本地代理（Clash Verge，mixed-port 7897）。
 
 - Clash 的 mixed-port 默认是 `7897`（本机实测）；环境变量里可能设置的是别的端口（如 `7174`），以实际监听为准：
   ```sh
