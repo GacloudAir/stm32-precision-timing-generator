@@ -207,8 +207,10 @@ static void usart1_init(void)
 {
     RCC->APB2ENR |= (1U << 2) | (1U << 14);      /* IOPAEN | USART1EN */
 
-    GPIOA->CRL &= ~(0xFU << 4);   GPIOA->CRL |= (0xAU << 4);   /* PA9  TX */
-    GPIOA->CRL &= ~(0xFU << 8);   GPIOA->CRL |= (0x4U << 8);   /* PA10 RX */
+    /* PA9/PA10 属于 CRH（pin 8-15），不是 CRL（pin 0-7）。
+     * 写 CRL 会误改 PA1/PA2，同时 UART 引脚根本没被配置。 */
+    GPIOA->CRH &= ~(0xFU << 4);   GPIOA->CRH |= (0xAU << 4);   /* PA9  TX，复用推挽 50MHz */
+    GPIOA->CRH &= ~(0xFU << 8);   GPIOA->CRH |= (0x4U << 8);   /* PA10 RX，浮空输入 */
 
     USART1->BRR = 0x0271U;                        /* 115200 @ 72MHz */
 
@@ -217,6 +219,16 @@ static void usart1_init(void)
 
     NVIC_EnableIRQ(USART1_IRQn);                  /* IRQ37，兼容 CMSIS 5/6 */
     NVIC_SetPriority(USART1_IRQn, 1U);
+}
+
+/* [1b] 板载 LED（PC13，低电平点亮）：固件跑起来的直观标志。
+ *      只在全部初始化完成后点亮，所以"灯亮"= 已进入主循环。 */
+static void led_on(void)
+{
+    RCC->APB2ENR |= (1U << 4);                    /* 启用 GPIOC 时钟（APB2） */
+    GPIOC->CRH &= ~(0xFU << 20);                  /* PC13 = CRH 的 bit[23:20] */
+    GPIOC->CRH |= (0x3U << 20);                   /* 通用推挽输出 50MHz */
+    GPIOC->BRR = (1U << 13);                      /* 输出低电平 -> 灯亮 */
 }
 
 /* [2] 底层发送：等 TXE（SR bit7）置位才能写 DR */
@@ -460,6 +472,7 @@ int main(void)
     outputs_to_af();
     tim2_start();                                 /* CEN = 1 */
     usart1_init();                                /* 串口上位机链路 */
+    led_on();                                     /* 初始化完成 -> 点亮 LED */
 
     while (1)
     {

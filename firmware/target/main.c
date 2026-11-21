@@ -209,8 +209,10 @@ static void usart1_init(void)
 {
     RCC->APB2ENR |= (1U << 2) | (1U << 14);      /* IOPAEN | USART1EN */
 
-    GPIOA->CRL &= ~(0xFU << 4);   GPIOA->CRL |= (0xAU << 4);   /* PA9  TX */
-    GPIOA->CRL &= ~(0xFU << 8);   GPIOA->CRL |= (0x4U << 8);   /* PA10 RX */
+    /* PA9/PA10 live in CRH (pins 8-15), NOT CRL (pins 0-7).
+     * Writing CRL here would clobber PA1/PA2 and leave the UART pins unconfigured. */
+    GPIOA->CRH &= ~(0xFU << 4);   GPIOA->CRH |= (0xAU << 4);   /* PA9  TX, AF push-pull 50MHz */
+    GPIOA->CRH &= ~(0xFU << 8);   GPIOA->CRH |= (0x4U << 8);   /* PA10 RX, floating input */
 
     USART1->BRR = 0x0271U;                        /* 115200 @ 72MHz */
 
@@ -221,8 +223,17 @@ static void usart1_init(void)
     NVIC_SetPriority(USART1_IRQn, 1U);
 }
 
-/* [2] Byte-level transmit: wait for TXE (SR bit7) before writing DR. */
-static void uart_send_byte(uint8_t b)
+/* [1b] Board LED (PC13, active-low): a visible "firmware is running" beacon.
+ *      Turns on only after all init is done, so a lit LED = main loop reached. */
+static void led_on(void)
+{
+    RCC->APB2ENR |= (1U << 4);                    /* GPIOC clock (APB2) */
+    GPIOC->CRH &= ~(0xFU << 20);                  /* PC13 = CRH bits [23:20] */
+    GPIOC->CRH |= (0x3U << 20);                   /* push-pull output 50MHz */
+    GPIOC->BRR = (1U << 13);                      /* drive low -> LED on */
+}
+
+/* [2] Byte-level transmit: wait for TXE (SR bit7) before writing DR. */static void uart_send_byte(uint8_t b)
 {
     while (!(USART1->SR & (1U << 7))) { }
     USART1->DR = b;
@@ -462,6 +473,7 @@ int main(void)
     outputs_to_af();
     tim2_start();                                 /* CEN = 1 */
     usart1_init();                                /* UART host link */
+    led_on();                                     /* init done -> LED on */
 
     while (1)
     {
@@ -478,7 +490,6 @@ int main(void)
 
             process_frame(frame_snap);
         }
-        __WFI();    /* USART1 RXNE interrupt wakes the CPU; no busy-wait. */
     }
 }
 

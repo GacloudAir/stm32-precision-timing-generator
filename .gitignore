@@ -14,6 +14,13 @@ Objects/
 Listings/
 DebugConfig/
 
+# Keil user-specific / auto-generated
+*.uvguix.*
+EventRecorderStub.scvd
+flash_log.txt
+rebuild_log.txt
+*.bak_*
+
 # Editor / OS
 .vscode/
 .idea/
