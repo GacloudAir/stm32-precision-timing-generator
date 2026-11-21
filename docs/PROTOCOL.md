@@ -66,7 +66,7 @@ AA 55 07 85 00 01 02 8B 0A 00 9F D7
 
 | 名称 | 完整帧（十六进制） |
 |---|---|
-| SET_PARAM FREQ=166666 | `AA 55 05 01 02 8B 0A AE CB` |
+| SET_PARAM FREQ=166666 | `AA 55 05 01 01 02 8B 0A 7B 45` |
 | GET_PARAM FREQ | `AA 55 02 02 01 10 A0` |
 | START | `AA 55 01 03 40 21` |
 | STOP | `AA 55 01 04 01 E3` |
@@ -110,6 +110,13 @@ AA 55 07 85 00 01 02 8B 0A 00 9F D7
 3. **GET_STATUS 响应漏掉 RESULT**
    旧 `uart_protocol_ref.c` 把 `resp[0]` 直接写成 `running`，违反"PAYLOAD[0]=RESULT"约定，
    上位机解出来的状态整体错位一格。已修正为 `RESULT + run + freq + err`。
+
+4. **SET_PARAM 请求测试向量曾漏掉 param_id**（2026-11-21 修正）
+   旧向量 `AA 55 05 01 02 8B 0A AE CB` 只有 9 字节：LEN=5 要求总帧长 10 字节，
+   且 payload 缺了 `param_id(1)`，CRC 也按 3 字节算出（0xCBAE），与固件的
+   `plen >= 4`（param_id + freq3）不自洽。正确向量为
+   `AA 55 05 01 01 02 8B 0A 7B 45`（CRC=0x457B，覆盖 `05 01 01 02 8B 0A`）。
+   其余 9 条向量已用独立脚本逐条核算无误。
 
 ## 6. 状态机要点
 
