@@ -25,29 +25,7 @@
 
 #include "stm32f10x.h"
 #include <stdint.h>
-
-/* ============================================================================
- *  公共约定：命令码、参数 ID、结果码
- *  这些数值上位机也要用同一份，建议以后抽成 shared/protocol.h 共用
- * ========================================================================== */
-#define CMD_SET_PARAM   0x01U
-#define CMD_GET_PARAM   0x02U
-#define CMD_START       0x03U
-#define CMD_STOP        0x04U
-#define CMD_GET_STATUS  0x05U
-#define CMD_SELF_TEST   0x06U
-
-#define RES_OK          0x00U
-#define RES_ERR_CRC     0x01U
-#define RES_ERR_UNK     0x02U
-#define RES_ERR_RANGE   0x03U
-
-#define PARAM_FREQ      0x01U      /* 频率：value 为 3 字节大端 Hz，166666 = 02 8B 0A */
-#define PARAM_DUTY      0x02U      /* 占空比档位（预留） */
-
-#define FRAME_MAX       32U        /* 接收缓冲上限，防止越界 */
-#define MAGIC0          0xAAU
-#define MAGIC1          0x55U
+#include "protocol.h"
 
 /* 复用 level 1 已定义的量（整合进 main.c 时删除这里的重复定义） */
 #define TIM_CLK_HZ      72000000UL
@@ -81,8 +59,8 @@ static void usart1_init(void)
      *    PA9 (bits 7:4)  = 0xA → CNF=10(复用推挽) MODE=10(2MHz)
      *    PA10(bits 11:8) = 0x4 → CNF=01(浮空输入) MODE=00
      */
-    GPIOA->CRL &= ~(0xFU << 4);   GPIOA->CRL |= (0xAU << 4);   /* PA9  TX */
-    GPIOA->CRL &= ~(0xFU << 8);   GPIOA->CRL |= (0x4U << 8);   /* PA10 RX */
+    GPIOA->CRL &= ~(0xFU << 4);   GPIOA->CRL |= (0xAU << 4);   // PA9  TX使能,先清零再置一
+    GPIOA->CRL &= ~(0xFU << 8);   GPIOA->CRL |= (0x4U << 8);   // PA10 RX使能,先清零再置一
 
     /* 3. 波特率 */
     USART1->BRR = 0x0271U;                        /* 115200 @ 72MHz */
@@ -93,8 +71,8 @@ static void usart1_init(void)
     /* 5. NVIC：USART1 中断号 37，抢占优先级设 1
      *    注意：优先级分组由 SystemInit 后的 NVIC_SetPriorityGrouping 决定，
      *    这里只设一个业务上够用的数值即可 */
-    NVIC->ISER[1] |= (1U << (37U - 32U));         /* 使能 IRQ37 */
-    NVIC->IPR[37]  = (1U << 4);                   /* 抢占优先级 1（注意是 IPR，不是 IP） */
+    NVIC_EnableIRQ((IRQn_Type)37);                /* USART1 IRQ 号为 37 */
+    NVIC_SetPriority((IRQn_Type)37, 1U);          /* 抢占优先级 1 */
 }
 
 /* ============================================================================
@@ -105,14 +83,14 @@ static void usart1_init(void)
  * ========================================================================== */
 static void uart_send_byte(uint8_t b)
 {
-    while (!(USART1->SR & (1U << 7))) { }        /* 等发送寄存器空 */
+    while (!(USART1->SR & (1U << 7))) { }        //按位与第七位,如果此位为空,返回false,即忙等待发送寄存器空
     USART1->DR = b;
 }
 
 static uint8_t uart_recv_byte(void)
 {
-    while (!(USART1->SR & (1U << 5))) { }        /* 等收到数据 */
-    return (uint8_t)USART1->DR;                  /* 读 DR 自动清 RXNE */
+    while (!(USART1->SR & (1U << 5))) { }        //忙等待数据接收
+    return (uint8_t)USART1->DR;                  // 读 DR 自动清 RXNE
 }
 
 /* ============================================================================
@@ -122,18 +100,18 @@ static uint8_t uart_recv_byte(void)
  *  Modbus 变体：初值 0xFFFF，多项式 0xA001（0x8005 的反射），逐位计算。
  *  这个函数的功能是：给一段数据算 2 字节校验码，附带在帧尾。
  * ========================================================================== */
-static uint16_t crc16_modbus(const uint8_t *data, uint16_t len)
+static uint16_t crc16_modbus(const uint8_t *data, uint16_t len)//modbus_crc16校验运算函数
 {
-    uint16_t crc = 0xFFFFU;
+    uint16_t crc = 0xFFFFU;//标准定义,存放此值的寄存器即为crc寄存器
     uint16_t i;
     uint8_t  j;
 
     for (i = 0; i < len; i++)
     {
-        crc ^= data[i];                          /* 先异或当前字节 */
-        for (j = 0; j < 8; j++)                  /* 再逐位处理 8 次 */
+        crc ^= data[i];                          //先用寄存器低八位异或当前字节
+        for (j = 0; j < 8; j++)                  //再逐位处理 8 次
         {
-            if (crc & 0x0001U)
+            if (crc & 0x0001U)                   //如果当前位为1,则左移一位后与多项式(A001是标准)异或,否则仅左移一位
                 crc = (crc >> 1) ^ 0xA001U;
             else
                 crc >>= 1;
@@ -143,7 +121,7 @@ static uint16_t crc16_modbus(const uint8_t *data, uint16_t len)
 }
 
 /* ============================================================================
- *  [4] 收帧状态机：串口是字节流，帧是我们自己"造"出来的
+ *  [4] 收帧状态机：串口是字节流,我们自定义了帧协议,也要自行处理
  * ----------------------------------------------------------------------------
  *  这是整个 Level 2 最核心、最容易出 bug 的地方，务必理解：
  *
@@ -175,45 +153,46 @@ static uint8_t       rx_index   = 0;     /* 已收到的字节数 */
 static volatile uint8_t frame_ready = 0; /* 主循环与中断之间的握手标志 */
 
 /* 中断里调用：喂一个字节进状态机 */
-static void protocol_feed(uint8_t b)
+//*:状态机是用一组状态和状态转移函数来实现的一种非阻塞地处理一个有先后顺序过程的代码
+static void protocol_feed(uint8_t b)//处理结构可能错误的帧,确保帧的完整性
 {
     switch (rx_state)
     {
-        case ST_WAIT_M0:
+        case ST_WAIT_M0://空闲状态,仅在接收到魔数M0(0xAA)时,进入下一个状态,收到其他帧自动丢弃
             if (b == MAGIC0) {
                 rx_frame[0] = b;
                 rx_state = ST_WAIT_M1;
             }
             break;
 
-        case ST_WAIT_M1:
+        case ST_WAIT_M1://验证M1(0x55),决定是回退,留在原地还是进入下一个状态
             if (b == MAGIC1) {
-                rx_frame[1] = b;
+                rx_frame[1] = b;//确认是魔数M1(0x55),则记录并进入下一状态
                 rx_state = ST_GET_LEN;
             } else {
-                /* 不是 0x55：若这个字节恰好是 0xAA，可能是新帧头，回退一步 */
+                // 不是 0x55：若这个字节恰好是 0xAA，可能是新帧头，重新记录M0并回到M1;否则回到最初的M0;
                 rx_state = (b == MAGIC0) ? ST_WAIT_M1 : ST_WAIT_M0;
                 if (rx_state == ST_WAIT_M1) rx_frame[0] = MAGIC0;
             }
             break;
 
-        case ST_GET_LEN:
+        case ST_GET_LEN://长度确认态,收到长度后,进入下一个状态,并记录长度
             /* LEN 至少为 1（要有 CMD），且不能超出缓冲 */
-            if (b >= 1U && (b + 5U) <= FRAME_MAX) {
+            if (b >= 1U && b <= LEN_MAX) {
                 rx_frame[2] = b;
                 rx_len  = b;
                 rx_index = 3;                 /* 下一个写入位置（从 LEN 之后算） */
                 rx_state = ST_GET_BODY;
             } else {
-                rx_state = ST_WAIT_M0;        /* 非法长度，重新同步 */
+                rx_state = ST_WAIT_M0;        // 非法长度，回到M0重新同步
             }
             break;
 
-        case ST_GET_BODY:
+        case ST_GET_BODY://数据收取态,收到数据后,记录数据,判断是否收满后通知解帧
             rx_frame[rx_index++] = b;
-            /* 总帧长 = 2(帧头) + 1(LEN) + LEN(CMD+PAYLOAD) + 2(CRC) = LEN + 5
+            /* 总帧长 = 2(帧头) + 1(LEN) + LEN(CMD+PAYLOAD主体总长度) + 2(CRC验证码) = LEN + 5
              * rx_index 从 3 开始，收满时 rx_index == LEN + 5 */
-            if (rx_index >= (uint8_t)(rx_len + 5U))
+            if (rx_index >= (uint8_t)(rx_len + FRAME_OVERHEAD))
             {
                 frame_ready = 1;              /* 通知主循环：有一帧待处理 */
                 rx_state = ST_WAIT_M0;        /* 立刻复位，准备下一帧 */
@@ -239,7 +218,7 @@ static void protocol_feed(uint8_t b)
 /* 组一帧响应并发送：payload 内容由调用方给 */
 static void send_response(uint8_t cmd, const uint8_t *payload, uint8_t plen)
 {
-    uint8_t  frame[FRAME_MAX];
+    uint8_t  frame[FRAME_MAX];                 //分配一帧的空间
     uint8_t  len = (uint8_t)(1U + plen);       /* LEN = CMD + PAYLOAD */
     uint16_t crc;
     uint8_t  i;
@@ -247,45 +226,45 @@ static void send_response(uint8_t cmd, const uint8_t *payload, uint8_t plen)
     frame[0] = MAGIC0;
     frame[1] = MAGIC1;
     frame[2] = len;
-    frame[3] = cmd | 0x80U;                    /* 响应帧最高位置 1 */
-    for (i = 0; i < plen; i++)
+    frame[3] = cmd | CMD_RESP_BIT;                   // 响应帧最高位置 1,换算成十六进制为0x8X,以此表示这是来自下位机的响应
+    for (i = 0; i < plen; i++)                       // 注入载荷
         frame[4 + i] = payload[i];
 
     /* CRC 覆盖 [LEN .. PAYLOAD末]，即从 frame[2] 开始的 len+1 个字节 */
-    crc = crc16_modbus(&frame[2], (uint16_t)(len + 1U));
-    frame[4 + plen]     = (uint8_t)(crc & 0xFFU);        /* 低字节在前 */
+    crc = crc16_modbus(&frame[2], (uint16_t)(len + 1U));//计算出可供自行验证的crc校验码
+    frame[4 + plen]     = (uint8_t)(crc & 0xFFU);    // crc低字节在前
     frame[4 + plen + 1] = (uint8_t)(crc >> 8);
 
-    for (i = 0; i < (uint8_t)(len + 5U); i++)
+    for (i = 0; i < (uint8_t)(len + FRAME_OVERHEAD); i++)//逐字节发送帧
         uart_send_byte(frame[i]);
 }
 
 /* 处理一帧完整数据 */
 static void process_frame(void)
 {
-    uint8_t  *f = rx_frame;
-    uint8_t   len = f[2];
-    uint8_t   cmd = f[3];
-    uint8_t  *payload = &f[4];
-    uint8_t   plen = (uint8_t)(len - 1U);      /* LEN 含 CMD，故 payload 少 1 */
-    uint16_t  crc_recv, crc_calc;
-    uint8_t   resp[8];
-    uint8_t   rlen = 0;
-    uint32_t  freq;
+    uint8_t  *f = rx_frame;                   //指向当前帧的起始地址
+    uint8_t   len = f[2];                     //长度位
+    uint8_t   cmd = f[3];                     //命令位
+    uint8_t  *payload = &f[4];                //指向载荷的起始地址              
+    uint8_t   plen = (uint8_t)(len - 1U);     // LEN 含 CMD，故 payload 少 1
+    uint16_t  crc_recv, crc_calc;             //分别定义低字节和高字节
+    uint8_t   resp[8];                        //定义一个8字节的缓冲区,用于存放响应帧的数据
+    uint8_t   rlen = 0;                       //定义响应帧的长度
+    uint32_t  freq;                           //定义频率变量
 
     /* --- 1. CRC 校验：帧尾两字节，低字节在前 --- */
     crc_recv = (uint16_t)f[3 + len] | ((uint16_t)f[4 + len] << 8);
     crc_calc = crc16_modbus(&f[2], (uint16_t)(len + 1U));
     if (crc_recv != crc_calc) {
-        resp[0] = RES_ERR_CRC;
-        send_response(cmd, resp, 1);
+        resp[0] = RES_ERR_CRC;                //校验失败回复错误码
+        send_response(cmd, resp, 1);          //发送包含错误码的响应帧
         return;
     }
 
     /* --- 2. 命令分发 --- */
-    switch (cmd)
+    switch (cmd)//对命令进行分发,根据命令执行不同的操作
     {
-        case CMD_SET_PARAM:
+        case CMD_SET_PARAM://修改arr和ccr
             if (plen < 4U) break;              /* 需要 param_id(1)+freq(3 字节) */
             if (payload[0] == PARAM_FREQ) {
                 /* value = 3 字节大端 Hz：02 8B 0A → 166666 */
@@ -300,7 +279,7 @@ static void process_frame(void)
             send_response(cmd, resp, 1);
             break;
 
-        case CMD_GET_PARAM:
+        case CMD_GET_PARAM://读取频率信息
             if (plen < 1U) break;
             if (payload[0] == PARAM_FREQ) {
                 uint32_t v = g_cfg.freq_hz;
@@ -315,21 +294,21 @@ static void process_frame(void)
             }
             break;
 
-        case CMD_START:
+        case CMD_START://启动输出
             tim2_start();
             g_cfg.running = 1U;
             resp[0] = RES_OK;
             send_response(cmd, resp, 1);
             break;
 
-        case CMD_STOP:
+        case CMD_STOP://停止输出
             tim2_stop();
             g_cfg.running = 0U;
             resp[0] = RES_OK;
             send_response(cmd, resp, 1);
             break;
 
-        case CMD_GET_STATUS:
+        case CMD_GET_STATUS://检查允许状况
             /* PAYLOAD = [RESULT(1)][run(1)][freq(3 大端)][err(1)]
              * 第一字节必须是 RESULT！旧版本漏掉它导致上位机解帧整体错位 */
             resp[0] = RES_OK;
@@ -342,7 +321,7 @@ static void process_frame(void)
             send_response(cmd, resp, rlen);
             break;
 
-        case CMD_SELF_TEST:
+        case CMD_SELF_TEST://自检输出精度
             /* Level 3 才做输入捕获自检，这里先回一个占位值 0 */
             resp[0] = RES_OK;
             resp[1] = 0U;
