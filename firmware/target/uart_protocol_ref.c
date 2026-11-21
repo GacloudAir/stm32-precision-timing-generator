@@ -13,12 +13,14 @@
  *    [4] 收帧状态机：把无边界的字节流切成一帧一帧
  *    [5] 命令分发：解析命令、改 g_cfg、组响应帧
  *
- *  帧格式（与上位机必须逐字节一致）：
+ *  帧格式（与上位机必须逐字节一致，权威定义在 docs/PROTOCOL.md）：
  *    [0xAA][0x55][LEN][CMD][PAYLOAD ...][CRC16lo][CRC16hi]
  *    - LEN   = CMD + PAYLOAD 的字节数（不含 2 字节帧头、不含 2 字节 CRC）
+ *    - 总帧长 = LEN + 5
  *    - CRC16 = Modbus，覆盖 [LEN .. PAYLOAD 末]，低字节在前
- *    - 多字节数据一律【大端】传输
- *    - 响应帧：CMD | 0x80，PAYLOAD[0] = RESULT(0=OK)
+ *    - 多字节数据一律【大端】传输，唯一例外是 CRC 低字节在前
+ *    - 响应帧：CMD | 0x80，PAYLOAD[0] 必须是 RESULT(0=OK)，之后才是数据
+ *    - 频率 3 字节大端 Hz：166666 = 02 8B 0A
  * ========================================================================== */
 
 #include "stm32f10x.h"
@@ -40,7 +42,7 @@
 #define RES_ERR_UNK     0x02U
 #define RES_ERR_RANGE   0x03U
 
-#define PARAM_FREQ      0x01U      /* 频率，单位 100Hz：1667 表示 166700Hz */
+#define PARAM_FREQ      0x01U      /* 频率：value 为 3 字节大端 Hz，166666 = 02 8B 0A */
 #define PARAM_DUTY      0x02U      /* 占空比档位（预留） */
 
 #define FRAME_MAX       32U        /* 接收缓冲上限，防止越界 */
@@ -284,11 +286,12 @@ static void process_frame(void)
     switch (cmd)
     {
         case CMD_SET_PARAM:
-            if (plen < 3U) break;              /* 需要 param_id(1)+value(2) */
+            if (plen < 4U) break;              /* 需要 param_id(1)+freq(3 字节) */
             if (payload[0] == PARAM_FREQ) {
-                /* value 大端 uint16，单位 100Hz：1667 → 166700Hz */
-                freq = ((uint32_t)payload[1] << 8) | payload[2];
-                freq *= 100UL;
+                /* value = 3 字节大端 Hz：02 8B 0A → 166666 */
+                freq = ((uint32_t)payload[1] << 16) |
+                       ((uint32_t)payload[2] << 8) |
+                       (uint32_t)payload[3];
                 timing_set_frequency(freq);    /* 复用 level 1 的调频函数 */
                 resp[0] = RES_OK;
             } else {
@@ -300,11 +303,12 @@ static void process_frame(void)
         case CMD_GET_PARAM:
             if (plen < 1U) break;
             if (payload[0] == PARAM_FREQ) {
-                uint32_t v = g_cfg.freq_hz / 100UL;
-                resp[0] = RES_OK;
-                resp[1] = (uint8_t)(v >> 8);   /* 大端回传 */
-                resp[2] = (uint8_t)(v & 0xFFU);
-                send_response(cmd, resp, 3);
+                uint32_t v = g_cfg.freq_hz;
+                resp[0] = RES_OK;              /* 第 1 字节必须是 RESULT，别漏 */
+                resp[1] = (uint8_t)(v >> 16);  /* 3 字节大端回传 */
+                resp[2] = (uint8_t)(v >> 8);
+                resp[3] = (uint8_t)(v & 0xFFU);
+                send_response(cmd, resp, 4);
             } else {
                 resp[0] = RES_ERR_RANGE;
                 send_response(cmd, resp, 1);
@@ -326,13 +330,15 @@ static void process_frame(void)
             break;
 
         case CMD_GET_STATUS:
-            /* [run(1)][freq(3 大端)][err(1)] */
-            resp[0] = g_cfg.running;
-            resp[1] = (uint8_t)(g_cfg.freq_hz >> 16);
-            resp[2] = (uint8_t)(g_cfg.freq_hz >> 8);
-            resp[3] = (uint8_t)(g_cfg.freq_hz);
-            resp[4] = 0U;                      /* err：预留给 Level 3 自检 */
-            rlen = 5;
+            /* PAYLOAD = [RESULT(1)][run(1)][freq(3 大端)][err(1)]
+             * 第一字节必须是 RESULT！旧版本漏掉它导致上位机解帧整体错位 */
+            resp[0] = RES_OK;
+            resp[1] = g_cfg.running;
+            resp[2] = (uint8_t)(g_cfg.freq_hz >> 16);
+            resp[3] = (uint8_t)(g_cfg.freq_hz >> 8);
+            resp[4] = (uint8_t)(g_cfg.freq_hz);
+            resp[5] = 0U;                      /* err：预留给 Level 3 自检 */
+            rlen = 6;
             send_response(cmd, resp, rlen);
             break;
 
