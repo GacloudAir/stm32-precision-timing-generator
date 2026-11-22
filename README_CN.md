@@ -11,6 +11,8 @@
 - **PWM1 + PWM2 组合**：能产生单一 PWM 模式做不到的"窗口"波形
 - **确定性启动**：引脚交给定时器之前先强制拉低，避免上电瞬间的毛刺
 - **抗振铃的 GPIO 配置**：用 2 MHz 驱动档而非 50 MHz，长导线上的边沿更干净
+- **串口命令协议**（115200 8N1）：运行时设定/回读频率、启停、状态查询——帧格式见 `docs/PROTOCOL.md`
+- **板载 LED（PC13）**：全部初始化完成后点亮，灯亮即代表已进入主循环
 - **裸机寄存器实现**（无 HAL 依赖），Keil MDK / armclang 编译
 
 ## 硬件
@@ -19,6 +21,8 @@
 |---|---|
 | 单片机 | STM32F103C8T6（Cortex-M3，72 MHz） |
 | 调试器 | ST-Link V2（SWD：PA13 / PA14） |
+| 上位机链路 | USART1：PA9 = TX，PA10 = RX，115200 8N1（经 CH340） |
+| 指示灯 | PC13 板载 LED，低电平点亮 |
 | 通道 | PA1 = CH1，PA2 = CH2，PA3 = CH3 |
 | 定时器 | TIM2，CH2 / CH3 / CH4 |
 | 逻辑电平 | 3.3 V |
@@ -38,17 +42,30 @@
 
 三路共用同一个时基。CH1 的下降沿与 CH3 的上升沿发生在同一个计数值（288），因此是**硬件对齐**的，不靠软件延时凑。
 
-当前版本频率为固定值。通过串口在运行时配置频率/占空比在下面的 Roadmap 中。
+默认频率 166666 Hz（周期 6 µs，ARR = 432 个计数），可通过串口在运行时修改；改变周期时三路通道保持 2:1:2 的比例。命令集见 `docs/PROTOCOL.md`。
 
 ## 快速上手
 
 1. 用 Keil MDK 打开 `firmware/target/timing-generator.uvprojx`（armclang V6.24，STM32F1xx DFP 2.4.1）
-2. 编译——应为 `0 Error, 0 Warning`，代码体积约 1.3 KB
-3. 用 ST-Link V2（SWD）烧录
-4. 示波器探头接 PA1 / PA2 / PA3，共地
-5. 触发源选 PA1 上升沿，时基 1 µs/格
+2. 编译——应为 `0 Error, 0 Warning`
+3. 用 ST-Link V2（SWD）烧录。烧完按一下 RST：PC13 灯亮，说明初始化完成、主循环已在运行
+4. 示波器探头接 PA1 / PA2 / PA3，共地；触发源选 PA1 上升沿，时基 1 µs/格
+5. 若需上位机控制：CH340 接到板子（TXD→PA10，RXD→PA9，GND→GND），运行 `tools/uart_probe.py`（见下）
 
 预期波形：PA1 高 4 µs / 低 2 µs；PA2 高 2 µs；PA3 高 2 µs 且与 PA1 下降沿对齐；周期 6 µs。
+
+### 串口链路自检
+
+`tools/uart_probe.py` 是独立的 PC 侧探测工具（只依赖 pyserial，不需要上位机本体）：
+
+```bash
+python tools/uart_probe.py selftest                      # 用 PROTOCOL.md 的向量校验 CRC/组帧，无需硬件
+python tools/uart_probe.py loopback --port COM10         # 短接 CH340 的 TXD-RXD，验证 PC 侧链路
+python tools/uart_probe.py probe --port COM10 --cmd GET_STATUS
+python tools/uart_probe.py probe --port COM10 --cmd SET_PARAM --freq 100000
+```
+
+`selftest` 会核对全部 10 条请求/响应向量以及重新同步逻辑，完全不碰板子——协议改动后拿它做回归最快。
 
 ## 设计决策（最值得讲的部分）
 
@@ -82,23 +99,41 @@ PA1 高 4µs / PA3 高 2µs，两路完全反相——PA1 下降沿与 PA3 上�
 
 PA2 高 2µs / PA3 高 2µs，两路之间有 2µs 全低间隔，PA3 下降沿与下一周期 PA2 上升沿重合。
 
+### 串口协议（上位机链路）
+
+已在真实硬件上通过 CH340、115200 8N1 全程验证，并做了"设定—回读"闭环：
+
+| 命令 | 响应 | 解析 |
+|---|---|---|
+| `GET_STATUS` | `AA 55 07 85 00 01 02 8B 0A 00 9F D7` | run=1，freq=166666 Hz，err=0 |
+| `SET_PARAM 100000 Hz` | `AA 55 02 81 00 B0 50` | OK |
+| `GET_PARAM`（设定后） | `AA 55 05 82 00 01 86 A0 4B 88` | freq=100000 Hz——写入确实生效 |
+| `STOP` 后 `GET_STATUS` | `AA 55 07 85 00 00 01 86 A0 00 4D 30` | run=0——状态同步 |
+| `START` 后 `GET_STATUS` | `AA 55 07 85 00 01 02 8B 0A 00 9F D7` | run=1，频率恢复 |
+
+`GET_STATUS` 的响应与 `docs/PROTOCOL.md` 中的参考向量**逐字节一致**，说明帧格式、CRC、状态机、命令分发与大端编码在固件和文档之间完全对齐。
+
 - [x] 波形照片，时基清晰可读（见 `assets/`）
+- [x] 串口协议端到端验证（全部命令 + 闭环回读）
 - [ ] 三通道同屏单张照片（需要四通道示波器）
-- [ ] "设定值 vs 实测值"误差表（目标 < 0.5%）
+- [ ] "设定值 vs 实测值"误差表（目标 < 0.5%）——需输入捕获或示波器
 
 ## 项目结构
 
 ```
 firmware/
   target/   最终可编译的固件与 Keil 工程（本项目）
-docs/       设计笔记
+  target/v4origin_app/  共享协议头（protocol.h），供固件与上位机共用
+docs/       设计笔记（PROTOCOL.md 是帧格式的唯一权威）
 assets/     示波器照片与示意图
+tools/      uart_probe.py——PC 侧串口探测工具（自检/回环/协议探测）
 ```
 
 ## 路线图
 
 - [x] 固定频率三通道波形
-- [ ] 串口参数配置（频率 / 脉宽 / 开关 / 状态回读）
+- [x] 串口参数配置（频率设定/回读、启停、状态查询）
+- [x] PC 侧串口探测工具（协议回归 + 链路自检）
 - [ ] C++ 上位机工具（串口 + 帧协议 + CSV 导出）
 - [ ] 输入捕获自检并输出误差报告
 

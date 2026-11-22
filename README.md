@@ -11,6 +11,8 @@ A three-channel, nanosecond-resolution timing waveform generator built on STM32F
 - **PWM1 + PWM2 combination** produces a window that a single PWM mode cannot
 - **Deterministic startup**: outputs are forced low before pins are handed to the timer, avoiding power-on glitches
 - **Ringing-aware GPIO config**: 2 MHz drive strength instead of 50 MHz for clean edges on long wires
+- **UART command protocol** (115200 8N1) for runtime frequency set/read, start/stop and status readback — frame format in `docs/PROTOCOL.md`
+- **Board LED (PC13)** lights after all init completes, so a lit LED means the main loop was reached
 - Bare-metal register-level implementation (no HAL dependency), Keil MDK / armclang
 
 ## Hardware
@@ -19,6 +21,8 @@ A three-channel, nanosecond-resolution timing waveform generator built on STM32F
 |---|---|
 | MCU | STM32F103C8T6 (Cortex-M3, 72 MHz) |
 | Debugger | ST-Link V2 (SWD: PA13 / PA14) |
+| Host link | USART1: PA9 = TX, PA10 = RX, 115200 8N1 (via CH340) |
+| Indicator | PC13 onboard LED, active low |
 | Channels | PA1 = CH1, PA2 = CH2, PA3 = CH3 |
 | Timer | TIM2, CH2 / CH3 / CH4 |
 | Logic level | 3.3 V |
@@ -38,17 +42,30 @@ Wiring: connect PA1 / PA2 / PA3 to the scope probes and GND to the board ground.
 
 All three channels share one time base. The falling edge of CH1 and the rising edge of CH3 occur at the same counter value (288), so they are aligned by hardware rather than by software delay.
 
-The firmware is fixed-frequency in this release. Runtime frequency / duty configuration over UART is on the roadmap below.
+The default frequency is 166666 Hz (6 us period, ARR = 432 counts) and is runtime-configurable over UART. Changing the period preserves the 2:1:2 ratio across the three channels. See `docs/PROTOCOL.md` for the command set.
 
 ## Quick start
 
 1. Open `firmware/target/timing-generator.uvprojx` in Keil MDK (armclang V6.24, STM32F1xx DFP 2.4.1)
-2. Build — expect `0 Error, 0 Warning`, code size ~1.3 KB
-3. Flash with ST-Link V2 (SWD)
-4. Connect oscilloscope probes to PA1 / PA2 / PA3, common ground
-5. Trigger on PA1 rising edge, timebase 1 us/div
+2. Build — expect `0 Error, 0 Warning`
+3. Flash with ST-Link V2 (SWD). After flashing, press RST once: the PC13 LED lights, confirming init completed and the main loop is running
+4. Connect oscilloscope probes to PA1 / PA2 / PA3, common ground; trigger on PA1 rising edge, timebase 1 us/div
+5. For host control, wire CH340 to the board (TXD to PA10, RXD to PA9, GND to GND) and run `tools/uart_probe.py` (see below)
 
-Expected: PA1 high 4 us / low 2 us; PA2 high 2 us; PA3 high 2 us aligned with PA1 falling edge; period 6 us.
+Expected waveform: PA1 high 4 us / low 2 us; PA2 high 2 us; PA3 high 2 us aligned with PA1 falling edge; period 6 us.
+
+### Serial link check
+
+`tools/uart_probe.py` is a standalone PC-side probe (pyserial only, no host app required):
+
+```bash
+python tools/uart_probe.py selftest                      # verify CRC / framing against PROTOCOL.md vectors, no hardware
+python tools/uart_probe.py loopback --port COM10         # short CH340 TXD-RXD to verify the PC-side chain
+python tools/uart_probe.py probe --port COM10 --cmd GET_STATUS
+python tools/uart_probe.py probe --port COM10 --cmd SET_PARAM --freq 100000
+```
+
+`selftest` checks all 10 request/response vectors and the resync logic without touching the board — useful as a quick regression check after any protocol change.
 
 ## Design decisions (the part worth talking about)
 
@@ -86,23 +103,44 @@ value, with no software delay.
 PA2 high 2 us / PA3 high 2 us, with the 2 us all-low gap between them, and
 PA3's falling edge coinciding with the next period's PA2 rising edge.
 
+### Serial protocol (host link)
+
+Verified on real hardware through a CH340 link at 115200 8N1. All commands were
+exercised end-to-end, including a set-then-read-back round trip:
+
+| Command | Response | Decoded |
+|---|---|---|
+| `GET_STATUS` | `AA 55 07 85 00 01 02 8B 0A 00 9F D7` | run=1, freq=166666 Hz, err=0 |
+| `SET_PARAM 100000 Hz` | `AA 55 02 81 00 B0 50` | OK |
+| `GET_PARAM` (after set) | `AA 55 05 82 00 01 86 A0 4B 88` | freq=100000 Hz — write took effect |
+| `STOP` then `GET_STATUS` | `AA 55 07 85 00 00 01 86 A0 00 4D 30` | run=0 — state tracked |
+| `START` then `GET_STATUS` | `AA 55 07 85 00 01 02 8B 0A 00 9F D7` | run=1, freq restored |
+
+The `GET_STATUS` response is byte-identical to the reference vector in
+`docs/PROTOCOL.md`, confirming frame layout, CRC, state machine, dispatch and
+big-endian encoding all agree between firmware and documentation.
+
 - [x] Waveform captures with readable timebase (see `assets/`)
+- [x] Serial protocol verified end-to-end (all commands + round trip)
 - [ ] Single three-channel capture (needs a 4-channel scope)
-- [ ] "Set vs measured" error table (target < 0.5%)
+- [ ] "Set vs measured" error table (target < 0.5%) — needs input-capture or scope
 
 ## Project structure
 
 ```
 firmware/
   target/   final, buildable firmware and Keil project (this project)
-docs/       design notes
+  target/v4origin_app/  shared protocol header (protocol.h) for firmware + host
+docs/       design notes (PROTOCOL.md is the authoritative frame spec)
 assets/     oscilloscope captures and diagrams
+tools/      uart_probe.py — PC-side serial probe (selftest / loopback / probe)
 ```
 
 ## Roadmap
 
 - [x] Fixed-frequency three-channel waveform
-- [ ] UART parameter configuration (frequency / pulse width / on-off / status readback)
+- [x] UART parameter configuration (frequency set/read, start/stop, status)
+- [x] PC-side serial probe tool (protocol regression + link check)
 - [ ] PC host tool in C++ (serial port + frame protocol + CSV export)
 - [ ] Input-capture self-check with error report
 
