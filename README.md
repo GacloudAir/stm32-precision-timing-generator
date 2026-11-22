@@ -120,10 +120,31 @@ The `GET_STATUS` response is byte-identical to the reference vector in
 `docs/PROTOCOL.md`, confirming frame layout, CRC, state machine, dispatch and
 big-endian encoding all agree between firmware and documentation.
 
+### Measured frequency error (input capture)
+
+`SELF_TEST` measures the real output period on PA6 (TIM3 input capture, 13.9 ns
+per count, N periods averaged where N adapts so the window stays inside one
+16-bit counter pass) and returns the deviation from the setpoint in permille.
+
+| Set (Hz) | Period (counts) | N | Measured err | Theory |
+|---|---|---|---|---|
+| 166666 | 432 | 16 | 0 ‰ | 0 ‰ |
+| 100000 | 720 | 16 | 0 ‰ | 0 ‰ |
+| 12345 | 5832 | 10 | 0 ‰ | 0 ‰ |
+| 5000 | 14400 | 4 | 0 ‰ | 0 ‰ |
+| 650000 | 110 | 16 | 6 ‰ | 6 ‰ |
+| 700000 | 102 | 16 | 8 ‰ | 8 ‰ |
+
+Measurement matches theory in all six cases. The residual error is **integer
+prescaler quantisation, not jitter**: 650000 Hz needs 110.77 counts and rounds
+to 110, yielding 654545 Hz. Frequencies that divide 72 MHz evenly measure 0 ‰.
+At the default 166666 Hz the quantisation error is 0.004 ‰ — well inside the
+0.5 % (5 ‰) target.
+
 - [x] Waveform captures with readable timebase (see `assets/`)
 - [x] Serial protocol verified end-to-end (all commands + round trip)
+- [x] "Set vs measured" error table via input capture (see above)
 - [ ] Single three-channel capture (needs a 4-channel scope)
-- [ ] "Set vs measured" error table (target < 0.5%) — needs input-capture or scope
 
 ## Project structure
 

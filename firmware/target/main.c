@@ -253,14 +253,22 @@ static void tim3_capture_init(void)
     TIM3->CR1   |=  (0x1U << 0);                  /* CEN = 1 */
 }
 
-/* Average period in timer counts over 16 rising edges.
+/* Average period in timer counts over N rising edges, where N is chosen so
+ * that N periods fit inside one 16-bit counter pass (N * period < 65535).
+ * At 166666 Hz that gives N = 16; at low frequencies N shrinks, down to 1.
  * Returns 0 on timeout - i.e. no signal on PA6 (the PA1->PA6 jumper is missing). */
 static uint16_t measure_period_counts(void)
 {
-    const uint8_t  N = 16U;
+    uint32_t per = (g_cfg.freq_hz != 0U) ? (TIM_CLK_HZ / g_cfg.freq_hz) : 432U;
     uint32_t timeout;
     uint16_t t0, t1;
-    uint8_t  i;
+    uint8_t  n, i;
+
+    /* Keep the measurement window inside one counter pass. 64000 leaves
+     * margin for the +/-1 count the real period may differ by. */
+    n = (uint8_t)(64000UL / (per ? per : 1U));
+    if (n > 16U) n = 16U;
+    if (n < 1U)  n = 1U;
 
     TIM3->SR = 0;                                 /* clear CC1IF */
     timeout = 200000U;
@@ -270,7 +278,7 @@ static uint16_t measure_period_counts(void)
     TIM3->SR &= ~(1U << 1);
     t0 = (uint16_t)TIM3->CCR1;
 
-    for (i = 0; i < N; i++) {
+    for (i = 0; i < n; i++) {
         timeout = 200000U;
         while (!(TIM3->SR & (1U << 1))) {         /* next rising edge */
             if (--timeout == 0U) return 0U;
@@ -279,9 +287,9 @@ static uint16_t measure_period_counts(void)
     }
     t1 = (uint16_t)TIM3->CCR1;
 
-    /* uint16 subtraction wraps correctly for one counter pass
-     * (16 periods x 432 counts = 6912, far below 65536). */
-    return (uint16_t)((uint16_t)(t1 - t0) / N);
+    /* uint16 subtraction wraps correctly for a single counter pass,
+     * which the adaptive N guarantees. */
+    return (uint16_t)((uint16_t)(t1 - t0) / n);
 }
 
 /* [2] Byte-level transmit: wait for TXE (SR bit7) before writing DR. */static void uart_send_byte(uint8_t b)

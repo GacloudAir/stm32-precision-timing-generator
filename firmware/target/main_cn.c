@@ -251,14 +251,22 @@ static void tim3_capture_init(void)
     TIM3->CR1   |=  (0x1U << 0);                  /* CEN = 1 */
 }
 
-/* 连测 16 个上升沿，返回平均周期（定时器计数）。
+/* 连测 N 个上升沿，返回平均周期（定时器计数）。
+ * N 按频率自适应，保证 N 个周期落在 16 位计数器的一次计数范围之内
+ * （N × 周期 < 65535）。166666Hz 时 N = 16；频率越低 N 越小，最小到 1。
  * 返回 0 表示超时——即 PA6 上没有信号（PA1->PA6 的跳线没接）。 */
 static uint16_t measure_period_counts(void)
 {
-    const uint8_t  N = 16U;
+    uint32_t per = (g_cfg.freq_hz != 0U) ? (TIM_CLK_HZ / g_cfg.freq_hz) : 432U;
     uint32_t timeout;
     uint16_t t0, t1;
-    uint8_t  i;
+    uint8_t  n, i;
+
+    /* 让测量窗口控制在一个计数回绕之内。留 64000 的余量，
+     * 抵消实际周期可能有的 ±1 计数偏差。 */
+    n = (uint8_t)(64000UL / (per ? per : 1U));
+    if (n > 16U) n = 16U;
+    if (n < 1U)  n = 1U;
 
     TIM3->SR = 0;                                 /* 清 CC1IF */
     timeout = 200000U;
@@ -268,7 +276,7 @@ static uint16_t measure_period_counts(void)
     TIM3->SR &= ~(1U << 1);
     t0 = (uint16_t)TIM3->CCR1;
 
-    for (i = 0; i < N; i++) {
+    for (i = 0; i < n; i++) {
         timeout = 200000U;
         while (!(TIM3->SR & (1U << 1))) {         /* 等下一个上升沿 */
             if (--timeout == 0U) return 0U;
@@ -277,9 +285,8 @@ static uint16_t measure_period_counts(void)
     }
     t1 = (uint16_t)TIM3->CCR1;
 
-    /* 16 位减法能正确处理一次计数回绕
-     * （16 个周期 × 432 计数 = 6912，远小于 65536）。 */
-    return (uint16_t)((uint16_t)(t1 - t0) / N);
+    /* 自适应 N 保证了只会有一次计数回绕，16 位减法的回绕处理才是对的。 */
+    return (uint16_t)((uint16_t)(t1 - t0) / n);
 }
 
 /* [2] 底层发送：等 TXE（SR bit7）置位才能写 DR */

@@ -123,6 +123,54 @@ script and are correct.
 `tools/uart_probe.py selftest` now re-verifies all vectors and the resync logic
 without any hardware — run it after touching the protocol.
 
+## Input-capture self-check: the overflow bug that only measurement caught
+
+`SELF_TEST` measures the real period on PA6 (TIM3_CH1) and returns the deviation
+in permille. The first version averaged a **fixed 16 periods**. At the default
+166666 Hz that is 16 × 432 = 6912 counts — fine. It also passed at 650000 and
+700000 Hz. It looked correct.
+
+Then 12345 Hz returned an error of **2359 ‰** (~236 %). Not noise, not a wiring
+problem, not jitter:
+
+```
+12345 Hz  ->  period = 72e6 / 12345 = 5832 counts
+16 periods ->  16 x 5832 = 93312 counts  >  65535 (16-bit counter)
+```
+
+The counter wrapped twice. A `uint16` subtraction only absorbs **one** wrap, so
+the measured period came out as `(93312 mod 65536) / 16 = 1736`, implying
+41475 Hz — a 236 % "error" that was purely an artefact of the measurement code.
+
+Fix: make N adaptive so the window always fits in one counter pass.
+
+```c
+n = (uint8_t)(64000UL / per);   /* 64000 leaves margin for +/-1 count */
+if (n > 16U) n = 16U;
+if (n < 1U)  n = 1U;
+```
+
+After the fix, six setpoints from 5 kHz to 700 kHz all match theory:
+
+| Set (Hz) | Period | N | Measured | Theory |
+|---|---|---|---|---|
+| 166666 | 432 | 16 | 0 ‰ | 0 ‰ |
+| 100000 | 720 | 16 | 0 ‰ | 0 ‰ |
+| 12345 | 5832 | 10 | 0 ‰ | 0 ‰ |
+| 5000 | 14400 | 4 | 0 ‰ | 0 ‰ |
+| 650000 | 110 | 16 | 6 ‰ | 6 ‰ |
+| 700000 | 102 | 16 | 8 ‰ | 8 ‰ |
+
+Two takeaways worth keeping:
+
+1. **A self-check that only ever returns 0 teaches you nothing.** The bug was
+   invisible at every frequency the developer happened to test first; it only
+   appeared once a low frequency was tried. Test across the range, not at the
+   nominal point.
+2. **Residual error here is quantisation, not jitter.** 650000 Hz needs 110.77
+   counts and rounds to 110 → 654545 Hz → 6 ‰. That is arithmetic, and it is
+   reproducible, which is exactly what distinguishes it from a timing problem.
+
 ## Checklist for next time
 
 1. `python tools/uart_probe.py selftest` — protocol logic, no hardware.
