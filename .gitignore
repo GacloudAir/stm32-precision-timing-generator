@@ -21,6 +21,11 @@ flash_log.txt
 rebuild_log.txt
 *.bak_*
 
+# CMake / C++ build output
+host/build/
+CMakeCache.txt
+CMakeFiles/
+
 # Editor / OS
 .vscode/
 .idea/

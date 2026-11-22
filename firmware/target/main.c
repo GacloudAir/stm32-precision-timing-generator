@@ -58,7 +58,7 @@
 #include "stm32f10x.h"
 /* Shared protocol constants. Kept as a separate header so the C++ host can
  * include the same file; Keil resolves this path relative to main.c. */
-#include "v4origin_app/protocol.h"
+#include "protocol.h"
 
 /* ---------- Waveform / timer parameters ---------- */
 #define TIM_CLK_HZ    72000000UL

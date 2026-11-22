@@ -155,6 +155,7 @@ firmware/
 docs/       design notes (PROTOCOL.md is the authoritative frame spec)
 assets/     oscilloscope captures and diagrams
 tools/      uart_probe.py — PC-side serial probe (selftest / loopback / probe)
+host/       PC GUI (Qt6 Widgets) — GUI done, protocol/device layer to implement
 ```
 
 ## Roadmap
@@ -163,7 +164,7 @@ tools/      uart_probe.py — PC-side serial probe (selftest / loopback / probe)
 - [x] UART parameter configuration (frequency set/read, start/stop, status)
 - [x] PC-side serial probe tool (protocol regression + link check)
 - [x] Input-capture self-check (TIM3/PA6; requires a PA1→PA6 jumper)
-- [ ] PC host tool in C++ (serial port + frame protocol + CSV export)
+- [ ] PC host tool in C++ (GUI scaffold ready in `host/`; protocol + serial layer to implement)
 - [ ] Three-channel simultaneous capture (needs a 4-channel scope)
 
 ## Contributing

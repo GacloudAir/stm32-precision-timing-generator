@@ -56,7 +56,7 @@
 #include "stm32f10x.h"
 /* 共享协议常量。单独保留为头文件，便于 C++ 上位机 include 同一份定义；
  * Keil 以 main.c 所在目录为基准解析这个相对路径。 */
-#include "v4origin_app/protocol.h"
+#include "protocol.h"
 
 /* ---------- 波形 / 定时器参数 ---------- */
 #define TIM_CLK_HZ    72000000UL
