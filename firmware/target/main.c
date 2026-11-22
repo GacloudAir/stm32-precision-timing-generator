@@ -233,6 +233,57 @@ static void led_on(void)
     GPIOC->BRR = (1U << 13);                      /* drive low -> LED on */
 }
 
+/* [1c] TIM3 CH1 input capture on PA6 - measures the *actual* output period.
+ *      Wire PA1 (OE, 6us period) to PA6 to enable the SELF_TEST measurement.
+ *      TIM3 runs at 72 MHz (PSC=0), so 1 count = 13.9 ns. */
+static void tim3_capture_init(void)
+{
+    RCC->APB1ENR |= (1U << 1);                    /* TIM3 clock (APB1) */
+
+    GPIOA->CRL &= ~(0xFU << 24);                  /* PA6 = CRL bits [27:24] */
+    GPIOA->CRL |= (0x4U << 24);                   /* floating input */
+
+    TIM3->PSC   = 0;                              /* 72 MHz */
+    TIM3->ARR   = 0xFFFFU;
+    TIM3->CCMR1 &= ~(0x3U << 0);                  /* CC1S = 01: IC1 <- TI1 */
+    TIM3->CCMR1 |=  (0x1U << 0);
+    TIM3->CCMR1 &= ~(0xFU << 4);                  /* IC1F = 0: no filter */
+    TIM3->CCER  &= ~(0x1U << 1);                  /* CC1P = 0: rising edge */
+    TIM3->CCER  |=  (0x1U << 0);                  /* CC1E = 1: enable */
+    TIM3->CR1   |=  (0x1U << 0);                  /* CEN = 1 */
+}
+
+/* Average period in timer counts over 16 rising edges.
+ * Returns 0 on timeout - i.e. no signal on PA6 (the PA1->PA6 jumper is missing). */
+static uint16_t measure_period_counts(void)
+{
+    const uint8_t  N = 16U;
+    uint32_t timeout;
+    uint16_t t0, t1;
+    uint8_t  i;
+
+    TIM3->SR = 0;                                 /* clear CC1IF */
+    timeout = 200000U;
+    while (!(TIM3->SR & (1U << 1))) {             /* 1st rising edge */
+        if (--timeout == 0U) return 0U;
+    }
+    TIM3->SR &= ~(1U << 1);
+    t0 = (uint16_t)TIM3->CCR1;
+
+    for (i = 0; i < N; i++) {
+        timeout = 200000U;
+        while (!(TIM3->SR & (1U << 1))) {         /* next rising edge */
+            if (--timeout == 0U) return 0U;
+        }
+        TIM3->SR &= ~(1U << 1);
+    }
+    t1 = (uint16_t)TIM3->CCR1;
+
+    /* uint16 subtraction wraps correctly for one counter pass
+     * (16 periods x 432 counts = 6912, far below 65536). */
+    return (uint16_t)((uint16_t)(t1 - t0) / N);
+}
+
 /* [2] Byte-level transmit: wait for TXE (SR bit7) before writing DR. */static void uart_send_byte(uint8_t b)
 {
     while (!(USART1->SR & (1U << 7))) { }
@@ -428,11 +479,27 @@ static void process_frame(const uint8_t *f)
             break;
 
         case CMD_SELF_TEST:
-            /* Placeholder until Level 3 input-capture measurement is added. */
-            resp[0] = RES_OK;
-            resp[1] = 0U;
-            resp[2] = 0U;                      /* err_permille = 0 */
-            send_response(cmd, resp, 3);
+            /* Measure the real output period on PA6 and report the deviation
+             * in permille. Returns err=0 when the PA1->PA6 jumper is absent
+             * (capture times out), so a missing jumper is distinguishable from
+             * a genuinely perfect output only by checking the wiring. */
+            {
+                uint16_t period_cnt = measure_period_counts();
+                uint16_t permille   = 0U;
+
+                if (period_cnt != 0U && g_cfg.freq_hz != 0U) {
+                    uint32_t actual_hz = TIM_CLK_HZ / period_cnt;
+                    uint32_t target_hz = g_cfg.freq_hz;
+                    uint32_t diff = (actual_hz > target_hz)
+                                  ? (actual_hz - target_hz)
+                                  : (target_hz - actual_hz);
+                    permille = (uint16_t)((diff * 1000UL) / target_hz);
+                }
+                resp[0] = RES_OK;
+                resp[1] = (uint8_t)(permille >> 8);        /* err_permille, big-endian */
+                resp[2] = (uint8_t)(permille & 0xFFU);
+                send_response(cmd, resp, 3);
+            }
             break;
 
         default:
@@ -472,6 +539,7 @@ int main(void)
     GPIOA->BSRR = (1U << 2);                      /* pre-set CH2 high */
     outputs_to_af();
     tim2_start();                                 /* CEN = 1 */
+    tim3_capture_init();                          /* input capture on PA6 */
     usart1_init();                                /* UART host link */
     led_on();                                     /* init done -> LED on */
 

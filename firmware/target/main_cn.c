@@ -231,6 +231,57 @@ static void led_on(void)
     GPIOC->BRR = (1U << 13);                      /* 输出低电平 -> 灯亮 */
 }
 
+/* [1c] TIM3 CH1 输入捕获（PA6）——测的是**实际输出**的周期。
+ *      把 PA1（OE，周期 6µs）用一根杜邦线接到 PA6 才能测。
+ *      TIM3 跑 72MHz（PSC=0），1 个计数 = 13.9 ns。 */
+static void tim3_capture_init(void)
+{
+    RCC->APB1ENR |= (1U << 1);                    /* 启用 TIM3 时钟（APB1） */
+
+    GPIOA->CRL &= ~(0xFU << 24);                  /* PA6 = CRL 的 bit[27:24] */
+    GPIOA->CRL |= (0x4U << 24);                   /* 浮空输入 */
+
+    TIM3->PSC   = 0;                              /* 72MHz */
+    TIM3->ARR   = 0xFFFFU;
+    TIM3->CCMR1 &= ~(0x3U << 0);                  /* CC1S = 01：IC1 接 TI1 */
+    TIM3->CCMR1 |=  (0x1U << 0);
+    TIM3->CCMR1 &= ~(0xFU << 4);                  /* IC1F = 0：不滤波 */
+    TIM3->CCER  &= ~(0x1U << 1);                  /* CC1P = 0：上升沿捕获 */
+    TIM3->CCER  |=  (0x1U << 0);                  /* CC1E = 1：使能捕获 */
+    TIM3->CR1   |=  (0x1U << 0);                  /* CEN = 1 */
+}
+
+/* 连测 16 个上升沿，返回平均周期（定时器计数）。
+ * 返回 0 表示超时——即 PA6 上没有信号（PA1->PA6 的跳线没接）。 */
+static uint16_t measure_period_counts(void)
+{
+    const uint8_t  N = 16U;
+    uint32_t timeout;
+    uint16_t t0, t1;
+    uint8_t  i;
+
+    TIM3->SR = 0;                                 /* 清 CC1IF */
+    timeout = 200000U;
+    while (!(TIM3->SR & (1U << 1))) {             /* 等第 1 个上升沿 */
+        if (--timeout == 0U) return 0U;
+    }
+    TIM3->SR &= ~(1U << 1);
+    t0 = (uint16_t)TIM3->CCR1;
+
+    for (i = 0; i < N; i++) {
+        timeout = 200000U;
+        while (!(TIM3->SR & (1U << 1))) {         /* 等下一个上升沿 */
+            if (--timeout == 0U) return 0U;
+        }
+        TIM3->SR &= ~(1U << 1);
+    }
+    t1 = (uint16_t)TIM3->CCR1;
+
+    /* 16 位减法能正确处理一次计数回绕
+     * （16 个周期 × 432 计数 = 6912，远小于 65536）。 */
+    return (uint16_t)((uint16_t)(t1 - t0) / N);
+}
+
 /* [2] 底层发送：等 TXE（SR bit7）置位才能写 DR */
 static void uart_send_byte(uint8_t b)
 {
@@ -427,11 +478,25 @@ static void process_frame(const uint8_t *f)
             break;
 
         case CMD_SELF_TEST:                      /* 自检输出精度 */
-            /* Level 3 才做输入捕获自检，这里先回占位值 0 */
-            resp[0] = RES_OK;
-            resp[1] = 0U;
-            resp[2] = 0U;                        /* err_permille = 0 */
-            send_response(cmd, resp, 3);
+            /* 在 PA6 上实测周期，把偏差换算成千分比返回。
+             * 若 PA1->PA6 跳线没接，捕获会超时，此时 err 返回 0。 */
+            {
+                uint16_t period_cnt = measure_period_counts();
+                uint16_t permille   = 0U;
+
+                if (period_cnt != 0U && g_cfg.freq_hz != 0U) {
+                    uint32_t actual_hz = TIM_CLK_HZ / period_cnt;
+                    uint32_t target_hz = g_cfg.freq_hz;
+                    uint32_t diff = (actual_hz > target_hz)
+                                  ? (actual_hz - target_hz)
+                                  : (target_hz - actual_hz);
+                    permille = (uint16_t)((diff * 1000UL) / target_hz);
+                }
+                resp[0] = RES_OK;
+                resp[1] = (uint8_t)(permille >> 8);        /* err_permille，大端 */
+                resp[2] = (uint8_t)(permille & 0xFFU);
+                send_response(cmd, resp, 3);
+            }
             break;
 
         default:
@@ -471,6 +536,7 @@ int main(void)
     GPIOA->BSRR = (1U << 2);                      /* 预先把 CH2 置高 */
     outputs_to_af();
     tim2_start();                                 /* CEN = 1 */
+    tim3_capture_init();                          /* PA6 上的输入捕获 */
     usart1_init();                                /* 串口上位机链路 */
     led_on();                                     /* 初始化完成 -> 点亮 LED */
 

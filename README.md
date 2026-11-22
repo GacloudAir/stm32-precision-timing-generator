@@ -141,8 +141,9 @@ tools/      uart_probe.py — PC-side serial probe (selftest / loopback / probe)
 - [x] Fixed-frequency three-channel waveform
 - [x] UART parameter configuration (frequency set/read, start/stop, status)
 - [x] PC-side serial probe tool (protocol regression + link check)
+- [x] Input-capture self-check (TIM3/PA6; requires a PA1→PA6 jumper)
 - [ ] PC host tool in C++ (serial port + frame protocol + CSV export)
-- [ ] Input-capture self-check with error report
+- [ ] Three-channel simultaneous capture (needs a 4-channel scope)
 
 ## Contributing
 
