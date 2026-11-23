@@ -30,6 +30,7 @@ try {
     Write-Host ""
     Write-Host "完成：" -ForegroundColor Green
     Write-Host "  GUI        build/timing-host.exe"
+    Write-Host "  联调工具   build/device-smoke.exe  (--port COM10)"
     Write-Host "  协议自检   build/protocol-selftest.exe"
     Write-Host ""
     Write-Host "运行前需要把 Qt DLL 加入 PATH，或直接双击 build 目录里的 exe（同目录需有 Qt6*.dll）。"

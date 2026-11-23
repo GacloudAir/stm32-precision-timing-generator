@@ -29,7 +29,19 @@ if(Qt6_FOUND)
     )
     target_include_directories(timing-host PRIVATE src)
     target_link_libraries(timing-host PRIVATE Qt6::Widgets Qt6::SerialPort)
-    message(STATUS "Qt6 found - building timing-host (GUI) + protocol-selftest")
+
+    # 2b) 无界面的联调工具：和 GUI 共用 TimingDevice，逐条打印命令结果。
+    #     Headless smoke test: shares TimingDevice with the GUI and prints
+    #     every command result, for hardware integration debugging.
+    add_executable(device-smoke
+        tests/device_smoke.cpp
+        src/core/protocol.cpp
+        src/core/device.cpp
+    )
+    target_include_directories(device-smoke PRIVATE src)
+    target_link_libraries(device-smoke PRIVATE Qt6::Core Qt6::SerialPort)
+
+    message(STATUS "Qt6 found - building timing-host (GUI) + device-smoke + protocol-selftest")
 else()
     message(WARNING "Qt6 not found - only protocol-selftest will be built")
 endif()

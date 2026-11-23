@@ -1,6 +1,6 @@
 # PC 上位机
 
-三通道时序发生器的图形化上位机。**协议层由你实现，GUI 由助手实现**，通过 `core/device.h` 的接口对接。
+三通道时序发生器的图形化上位机。GUI、协议层、设备层均已实现，通过 `core/device.h` 的接口对接；关键逻辑带中英双语注释。
 
 ## 目录结构
 
@@ -12,16 +12,15 @@ host/
     core/
       models.h            Status 数据类（已定稿，双方共用）
       protocol.h          协议接口声明（契约）
-      protocol.cpp        ★ 你实现：CRC16 / 组帧 / 解帧
-      device.h            设备门面接口（契约）
-      device.cpp          ★ 你实现：QSerialPort 收发 + 命令封装
+      protocol.cpp        CRC16 / 组帧 / 解帧（双语注释）
+      device.h            设备门面接口 + sendAndWait 私有声明（契约）
+      device.cpp          QSerialPort 收发 + 命令封装（双语注释）
     ui/
-      mainwindow.h/.cpp   GUI（助手）
+      mainwindow.h/.cpp   GUI
   tests/
     protocol_selftest.cpp 协议自检，不依赖 Qt、不接硬件
+    device_smoke.cpp      联调工具：和 GUI 共用设备层，逐条打印命令结果
 ```
-
-★ 标记的两个文件是你要写的；其余已由助手完成。
 
 ## 接口契约（GUI 只认这些）
 
@@ -63,15 +62,20 @@ cmake --build host/build --target protocol-selftest
 
 全部 OK 再往下走。这时你的 CRC/组帧/解帧已经可信了。
 
-**第 3 步：串口层 + 门面**
-实现 `device.cpp`。先在命令行验证，不用打开 GUI：
+**第 3 步：命令行联调（推荐顺序）**
+不用打开 GUI，先用 `device-smoke` 逐条验证 6 个命令：
 
-```bash
-# 假设已有一个临时 main 或者用 Qt 的 qDebug 打印
+```powershell
+.\build\device-smoke.exe --port COM10 --read-only   # 只读探针
+.\build\device-smoke.exe --port COM10               # 完整流程
 ```
 
+`device-smoke` 走的是和 GUI 完全相同的 `TimingDevice`，打印每条命令的结果。
+若失败，先用 `python ../tools/uart_probe.py probe --port COM10 --cmd GET_STATUS`
+区分是固件问题还是上位机问题。
+
 **第 4 步：GUI**
-把 `main.cpp` 里的 `MockDevice` 换成 `TimingDevice` 即可。
+直接运行 `.\build\timing-host.exe`，选择同一串口即可，无需改 GUI 代码。
 
 ## 编译（Qt6 + MinGW）
 

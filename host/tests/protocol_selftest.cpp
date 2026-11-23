@@ -99,13 +99,13 @@ int main()
                static_cast<std::uint8_t>(CmdSelfTest | RespBit), fromHex("00 00 00"));
 
     std::printf("\n=== 噪声前缀 ===");
-    checkParse("噪声+一帧", "00 FF 7E AA 55 01 05 C0 23",
-               static_cast<std::uint8_t>(CmdGetStatus | RespBit), {});
-    // 注意：上一条期望 cmd=0x85、payload 为空（LEN=1 时 payload 长度 0）
+    checkParse("噪声+响应帧", "00 FF 7E AA 55 07 85 00 01 02 8B 0A 00 9F D7",
+               static_cast<std::uint8_t>(CmdGetStatus | RespBit), fromHex("00 01 02 8B 0A 00"));
 
     std::printf("\n=== 粘包（两帧连发）===\n");
     {
-        auto buf = fromHex("AA 55 01 05 C0 23 AA 55 01 03 40 21");
+        // GET_STATUS 响应 + START 响应，两帧首尾相接
+        auto buf = fromHex("AA 55 07 85 00 01 02 8B 0A 00 9F D7 AA 55 02 83 00 B1 30");
         auto f1 = proto::parseFrame(buf);
         auto f2 = proto::parseFrame(buf);
         bool ok = f1 && f2 && f1->cmd == 0x85 && f2->cmd == 0x83 && buf.empty();
