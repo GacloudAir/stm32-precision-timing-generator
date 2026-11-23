@@ -36,6 +36,9 @@ private:
     // Show only the SELF_TEST measurement; GET_STATUS.err is reserved by the
     // firmware and always reads 0, so polling must not overwrite this label.
     void refreshErrLabel();
+    // 状态值配色：运行中/零误差绿色，有误差橙色，未就绪灰色。
+    // Colour-code status values: green for running/zero error, amber otherwise.
+    void refreshValueStyles();
     // 统一把 DeviceError 转成界面提示，避免每个槽都写 try/catch 重复代码
     void guarded(const QString& what, const std::function<void()>& fn);
 
