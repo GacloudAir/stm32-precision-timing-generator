@@ -191,6 +191,16 @@ void MainWindow::setConnectedUi(bool connected)
     m_selfTestBtn->setEnabled(connected);
 }
 
+void MainWindow::refreshErrLabel()
+{
+    // 中文：误差只认 SELF_TEST 的返回值，绝不从 GET_STATUS 的预留字段取。
+    // EN: The error label reflects SELF_TEST only, never GET_STATUS.err
+    //     (which the firmware reserves and leaves at 0).
+    m_errValue->setText(m_lastSelfTestErr < 0
+                            ? "--"
+                            : QString::number(m_lastSelfTestErr) + " ‰");
+}
+
 void MainWindow::toggleConnection()
 {
     if (m_dev->isConnected()) {
@@ -198,7 +208,8 @@ void MainWindow::toggleConnection()
         setConnectedUi(false);
         m_runValue->setText("--");
         m_freqValue->setText("--");
-        m_errValue->setText("--");
+        m_lastSelfTestErr = -1;
+        refreshErrLabel();
         log("已断开");
         return;
     }
@@ -228,6 +239,8 @@ void MainWindow::applyFrequency()
     }
     guarded("设置频率", [&] {
         m_dev->setFreq(hz);
+        m_lastSelfTestErr = -1;   // 频率变了，旧的实测误差失效
+        refreshErrLabel();
         log(QString("设置频率 %1 Hz").arg(hz));
     });
     doRefreshStatus();
@@ -255,10 +268,11 @@ void MainWindow::doSelfTest()
 {
     guarded("自检", [&] {
         const int err = m_dev->selfTest();
-        m_errValue->setText(QString::number(err) + " ‰");
+        m_lastSelfTestErr = err;
+        refreshErrLabel();
         log(QString("SELF_TEST 完成，误差 %1 ‰").arg(err));
         if (err == 0)
-            log("  提示：0‰ 也可能是 PA1→PA6 跳线未接（捕获超时）");
+            log("  提示：0‰ 可能是频率整除无误差，也可能是 PA1→PA6 跳线未接");
     });
 }
 
@@ -270,7 +284,8 @@ void MainWindow::doRefreshStatus()
         const Status st = m_dev->getStatus();
         m_runValue->setText(st.running ? "运行中" : "已停止");
         m_freqValue->setText(QString::number(st.freq_hz) + " Hz");
-        m_errValue->setText(QString::number(st.err_permille) + " ‰");
+        // 不写 m_errValue：它只由 SELF_TEST 更新，轮询不能覆盖。
+        refreshErrLabel();
     });
 }
 
@@ -283,7 +298,8 @@ void MainWindow::onPollTimer()
         const Status st = m_dev->getStatus();
         m_runValue->setText(st.running ? "运行中" : "已停止");
         m_freqValue->setText(QString::number(st.freq_hz) + " Hz");
-        m_errValue->setText(QString::number(st.err_permille) + " ‰");
+        // GET_STATUS.err 是固件预留位（恒 0），轮询不刷新实测误差标签。
+        // GET_STATUS.err is reserved by firmware (always 0); don't touch label.
     } catch (const std::exception&) {
         // ignore
     }

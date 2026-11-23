@@ -1,4 +1,4 @@
-# 一键构建上位机（Qt6 + MinGW）
+﻿# 一键构建上位机（Qt6 + MinGW）
 # 用法： powershell -ExecutionPolicy Bypass -File host\build.ps1
 
 $ErrorActionPreference = "Stop"
@@ -27,14 +27,18 @@ try {
     cmake --build build --parallel
     if ($LASTEXITCODE -ne 0) { throw "编译失败" }
 
+    Write-Host "== 部署 Qt / MinGW 运行库（可直接双击 exe）==" -ForegroundColor Cyan
+    & "$QtDir/bin/windeployqt.exe" --no-translations .\build\timing-host.exe | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "windeployqt 失败" }
+    Copy-Item "$QtDir/plugins/platforms/qoffscreen.dll" .\build\platforms\ -ErrorAction SilentlyContinue
+
     Write-Host ""
     Write-Host "完成：" -ForegroundColor Green
-    Write-Host "  GUI        build/timing-host.exe"
+    Write-Host "  GUI        build/timing-host.exe  （双击即可，已带运行库）"
     Write-Host "  联调工具   build/device-smoke.exe  (--port COM10)"
     Write-Host "  协议自检   build/protocol-selftest.exe"
     Write-Host ""
-    Write-Host "运行前需要把 Qt DLL 加入 PATH，或直接双击 build 目录里的 exe（同目录需有 Qt6*.dll）。"
-    Write-Host "临时运行：`$env:PATH='$QtDir/bin;' + `$env:PATH; .\build\timing-host.exe"
+    Write-Host "临时命令行运行：`$env:PATH='$QtDir/bin;' + `$env:PATH; .\build\timing-host.exe"
 }
 finally {
     Pop-Location

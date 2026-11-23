@@ -32,6 +32,10 @@ private:
     void buildUi();
     void log(const QString& msg);
     void setConnectedUi(bool connected);
+    // 只显示 SELF_TEST 的实测误差；GET_STATUS 的 err 字段是固件预留位（恒 0）。
+    // Show only the SELF_TEST measurement; GET_STATUS.err is reserved by the
+    // firmware and always reads 0, so polling must not overwrite this label.
+    void refreshErrLabel();
     // 统一把 DeviceError 转成界面提示，避免每个槽都写 try/catch 重复代码
     void guarded(const QString& what, const std::function<void()>& fn);
 
@@ -49,4 +53,5 @@ private:
     QLabel*         m_errValue   = nullptr;
     QPlainTextEdit* m_log        = nullptr;
     QTimer*         m_pollTimer  = nullptr;
+    int             m_lastSelfTestErr = -1;   // -1 = 尚未自检 / not measured yet
 };

@@ -87,8 +87,13 @@ cmake --build host/build
 ./host/build/timing-host.exe
 ```
 
-需要 `C:/Qt/Tools/mingw1310_64/bin` 和 `C:/Qt/6.8.3/mingw_64/bin` 在 PATH 中
-（运行时也依赖后者里的 Qt DLL）。
+需要 `C:/Qt/Tools/mingw1310_64/bin` 和 `C:/Qt/6.8.3/mingw_64/bin` 在 PATH 中编译。
+
+`build.ps1` 会自动调用 `windeployqt` 把 Qt / MinGW 运行库拷到 `build/`，
+所以**编译后直接双击 `host/build/timing-host.exe` 即可运行**，不需要配 PATH。
+
+GUI 里"实测误差"只显示 `SELF_TEST` 的返回值；`GET_STATUS` 的 `err` 字段是
+固件预留位（恒 0），不会被轮询刷掉。改频率后误差会清空，需要重新点自检。
 
 ## 协议速查
 
