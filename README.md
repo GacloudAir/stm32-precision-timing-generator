@@ -138,8 +138,11 @@ per count, N periods averaged where N adapts so the window stays inside one
 Measurement matches theory in all six cases. The residual error is **integer
 prescaler quantisation, not jitter**: 650000 Hz needs 110.77 counts and rounds
 to 110, yielding 654545 Hz. Frequencies that divide 72 MHz evenly measure 0 ‰.
-At the default 166666 Hz the quantisation error is 0.004 ‰ — well inside the
-0.5 % (5 ‰) target.
+At the default 166666 Hz the quantisation error is 0.004 ‰ — far inside the
+0.5 % (5 ‰) accuracy target. Above 5 ‰, the 6 ‰ / 8 ‰ readings at 650000 /
+700000 Hz are the same integer-prescaler quantisation (a small denominator
+rounds more coarsely), not timing jitter; the default operating point meets
+the target with wide margin.
 
 - [x] Waveform captures with readable timebase (see `assets/`)
 - [x] Serial protocol verified end-to-end (all commands + round trip)
@@ -151,11 +154,13 @@ At the default 166666 Hz the quantisation error is 0.004 ‰ — well inside the
 ```
 firmware/
   target/   final, buildable firmware and Keil project (this project)
-  target/v4origin_app/  shared protocol header (protocol.h) for firmware + host
+  target/protocol.h     shared protocol header for firmware + host
+  target/backup/        archived pre-UART sources and old project files
 docs/       design notes (PROTOCOL.md is the authoritative frame spec)
 assets/     oscilloscope captures and diagrams
 tools/      uart_probe.py — PC-side serial probe (selftest / loopback / probe)
-host/       PC GUI (Qt6 Widgets) — GUI done, protocol/device layer to implement
+host/       PC tool (Qt6 Widgets) — GUI, protocol and device layer complete;
+            build.ps1, protocol-selftest and device-smoke included
 ```
 
 ## Roadmap
@@ -164,7 +169,8 @@ host/       PC GUI (Qt6 Widgets) — GUI done, protocol/device layer to implemen
 - [x] UART parameter configuration (frequency set/read, start/stop, status)
 - [x] PC-side serial probe tool (protocol regression + link check)
 - [x] Input-capture self-check (TIM3/PA6; requires a PA1→PA6 jumper)
-- [ ] PC host tool in C++ (GUI scaffold ready in `host/`; protocol + serial layer to implement)
+- [x] C++ PC host tool (Qt6 GUI + protocol layer + serial facade; 13/13 protocol
+      self-test, 11/11 hardware smoke test, see `host/README.md`)
 - [ ] Three-channel simultaneous capture (needs a 4-channel scope)
 
 ## Contributing

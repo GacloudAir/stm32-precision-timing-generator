@@ -150,7 +150,7 @@ GitHub 在国内直连也可能因网络波动超时，此时可走本地代理�
 | --- | --- |
 | `firmware/target/main.c` | **Keil 工程实际编译的主文件**，现在是英文注释、含运行时调频功能 |
 | `firmware/target/main_cn.c` | 中文注释参考版，代码逻辑与 `main.c` 完全一致，仅供阅读 |
-| `firmware/target/uart_protocol_ref.c` | UART 协议参考笔记 |
+| `firmware/target/backup/v4origin_app/uart_protocol_ref.c` | UART 协议参考笔记（已归档） |
 | `firmware/target/timing-generator.uvprojx` | Keil MDK 工程，引用 `main.c` |
 
 改动功能时**以 `main.c` 为准**，改完同步更新 `main_cn.c` 的注释；两者去注释后的代码应保持一致：

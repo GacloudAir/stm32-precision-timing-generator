@@ -1,7 +1,11 @@
 #include "core/protocol.h"
 
 // ===========================================================================
-//  待实现（你写）。完成后运行 protocol-selftest 对照 PROTOCOL.md 的全部向量。
+//  协议实现：CRC16 / 组帧 / 解帧。
+//  帧格式见 docs/PROTOCOL.md（唯一权威）。修改后请用 protocol-selftest
+//  对照该文档的全部测试向量回归。
+//  Frame codec: CRC16 / build / parse. See docs/PROTOCOL.md (authoritative).
+//  After any change, re-run protocol-selftest against every documented vector.
 // ===========================================================================
 
 namespace proto {

@@ -561,7 +561,6 @@ int main(void)
 
             process_frame(frame_snap);
         }
-        __WFI();    /* USART1 的 RXNE 中断能唤醒 CPU；不忙等 */
     }
 }
 
