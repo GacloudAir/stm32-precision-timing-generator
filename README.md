@@ -144,9 +144,33 @@ At the default 166666 Hz the quantisation error is 0.004 ‰ — far inside the
 rounds more coarsely), not timing jitter; the default operating point meets
 the target with wide margin.
 
+### PC host integration test (2026-11-23)
+
+The Qt6 host tool was exercised end-to-end against the real board via CH340
+on `COM10` at 115200 8N1. The command sequence and outcome:
+
+| Step | Command | Result |
+|---|---|---|
+| 1 | `GET_STATUS` | run=0, freq=166666 Hz |
+| 2 | `GET_PARAM(FREQ)` | 166666 Hz |
+| 3 | `SET_PARAM(FREQ=650000)` | OK |
+| 4 | `GET_PARAM(FREQ)` | 650000 Hz — write took effect |
+| 5 | `START` | OK, status reports running |
+| 6 | `SELF_TEST` | **6 ‰ measured error** |
+| 7 | `STOP` | OK, status reports stopped |
+| 8 | Restore scene | freq 166666 Hz, run=0 |
+
+**11 / 11 checks passed.** The 6 ‰ at 650000 Hz matches the theoretical
+integer-prescaler quantisation in the table above, confirming the host tool,
+the firmware and the input-capture measurement agree on real hardware.
+
+Reproduce with `host/build/device-smoke.exe --port COM10 --freq 650000`
+(the tool restores the original frequency and run state on exit).
+
 - [x] Waveform captures with readable timebase (see `assets/`)
 - [x] Serial protocol verified end-to-end (all commands + round trip)
 - [x] "Set vs measured" error table via input capture (see above)
+- [x] PC host integration test on real hardware (11/11, see above)
 - [ ] Single three-channel capture (needs a 4-channel scope)
 
 ## Project structure
